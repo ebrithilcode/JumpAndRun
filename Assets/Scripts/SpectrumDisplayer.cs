@@ -64,10 +64,14 @@ public class SpectrumDisplayer : MonoBehaviour {
     {
         for (int i=0;i<targetBarHeights.Length;i++)
         {
+            if (i > blocks.Count) Debug.LogWarning("i " + i + " is out of range of " + blocks.Count + " for blocks");
+            if (i > targetBarHeights.Length) Debug.LogWarning("i " + i + " is out of range of " + targetBarHeights.Length + " for targetHeight");
             if (blocks[i].Count > targetBarHeights[i])
             {
                 for (int o = blocks[i].Count - 1; o >= targetBarHeights[i]; o--)
                 {
+                    if (o < 0) Debug.LogWarning("O is below zero");
+                    if (o > blocks[i].Count) Debug.LogWarning("o " + o + " is out of range at blocks of i with range " + blocks[i].Count);
                     Destroy(blocks[i][o]);
                     blocks[i].RemoveAt(o);
                 }

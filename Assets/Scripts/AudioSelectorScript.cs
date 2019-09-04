@@ -36,13 +36,21 @@ public class AudioSelectorScript : MonoBehaviour {
 	void Update () {
 		if (!source.isPlaying)
         {
-            source.clip = clips[clipIndex];
-            source.Play();
-
-            clipIndex++;
-            clipIndex %= clips.Count;
+            nextTrack();
         }
+        if (Input.GetKeyDown("r")) nextTrack();
+
 	}
+
+    void nextTrack()
+    {
+        source.Stop();
+        source.clip = clips[clipIndex];
+        source.Play();
+
+        clipIndex++;
+        clipIndex %= clips.Count;
+    }
 
     void shuffleClips(int times)
     {

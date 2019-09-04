@@ -50,6 +50,8 @@ public class FFT  {
 
         ComplexNumber[] complexValues = doubleArrayToComplex(samples);
 
+        complexValues = prepareInputVector(complexValues);
+
         ComplexNumber[] result = calculateMatrixMultiplication(samples.Length, 0, complexValues);
 
 
@@ -64,6 +66,18 @@ public class FFT  {
         return complexArrayToDouble(result);
     }
 
+    private static ComplexNumber[] prepareInputVector(ComplexNumber[] samples)
+    {
+        ComplexNumber baseRoot = ComplexNumber.unaryRoot(samples.Length).pow(samples.Length / 2 - 1);
+        ComplexNumber[] result = new ComplexNumber[samples.Length];
+
+        for (int i=0;i<result.Length;i++)
+        {
+            result[i] = samples[i] * baseRoot.pow(i);
+        }
+
+        return result;
+    }
 
     private static ComplexNumber[] calculateMatrixMultiplication(int matrixSize, int recursionDepth, ComplexNumber[] samples)
     {

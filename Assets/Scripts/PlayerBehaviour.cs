@@ -6,7 +6,7 @@ public class PlayerBehaviour : MonoBehaviour {
 
     public enum State
     {
-        Idle, Walking, Running, Jumping, Backwards, Falling, Uncontrolled, Undefined
+        Idle, Walking, Running, Jumping, Backwards, Falling, Rising, Landing, Undefined
     }
 
     State state = State.Idle;
@@ -40,8 +40,8 @@ public class PlayerBehaviour : MonoBehaviour {
         animationNameToState.Add("Base.FastUpJump", State.Jumping);
         animationNameToState.Add("Base.WallRun", State.Jumping);
         animationNameToState.Add("Base.Falling", State.Falling);
-        animationNameToState.Add("Base.Landing", State.Uncontrolled);
-        animationNameToState.Add("Base.StandUp", State.Uncontrolled);
+        animationNameToState.Add("Base.Landing", State.Landing);
+        animationNameToState.Add("Base.StandUp", State.Rising);
 
 
         addAnimationTransitions();
@@ -85,7 +85,7 @@ public class PlayerBehaviour : MonoBehaviour {
                     minDist = Mathf.Min(minDist, (hit.point - transform.position).magnitude);
                 }
             }
-            if (minDist > 3f)
+            if (minDist > 2f)
             {
                 if (Time.time - lastJump > 1f)
                 {
@@ -99,10 +99,13 @@ public class PlayerBehaviour : MonoBehaviour {
 
         
         animator.SetFloat("Speed", Input.GetAxis("Vertical"));
+
         Vector2 distanceToObstacle = distanceAndHeightToCollider(6f);
         foreach (AnimationWithCondition possibleAnim in possibleAnimations) {
             possibleAnim.playAnimationIfValid(this, distanceToObstacle.x, distanceToObstacle.y);
         }
+        if (animator.GetBool("CanWalk") != (distanceToObstacle.x > 0.3f) )
+            animator.SetBool("CanWalk", distanceToObstacle.x > 0.3f);
             
 
         //Run or run not
@@ -114,24 +117,44 @@ public class PlayerBehaviour : MonoBehaviour {
             animator.SetBool("IsRunning", false);
         }
 
+
+        //If the player drops below a specified height, he shall be respawned falling on the big red block
+
+        if (transform.position.y < -25)
+        {
+            transform.position = new Vector3(10, 75, 23);
+        }
+
 	}
 
     private void deactivateGravityUntilLanding()
     {
-        OnStateEnter(State.Jumping, () => GetComponent<Rigidbody>().useGravity = false);
+        GetComponent<Rigidbody>().useGravity = false;
+        //OnStateEnter(State.Jumping, () => GetComponent<Rigidbody>().useGravity = false);
         OnStateFinish(State.Jumping, () => GetComponent<Rigidbody>().useGravity = true);
     }
 
     private void setKinematicUntilLanding()
     {
-        OnStateEnter(State.Jumping, () => GetComponent<Rigidbody>().isKinematic = true);
-        OnStateFinish(State.Jumping, () => GetComponent<Rigidbody>().isKinematic = false);
+        setKinematicUntilEndOf(State.Jumping);
+        
+    }
+
+    private void setKinematicUntilEndOf(State state)
+    {
+        GetComponent<Rigidbody>().isKinematic = true;
+        //OnStateEnter(State.Jumping, () => GetComponent<Rigidbody>().isKinematic = true);
+        OnStateFinish(state, () => GetComponent<Rigidbody>().isKinematic = false);
+
     }
 
     //Manage possible landing
     private void OnCollisionEnter(Collision collision)
     {
-        if (state == State.Falling) animator.SetTrigger("LandHard");
+        animator.SetTrigger("LandHard");
+        OnStateFinish(State.Landing,
+                () => setKinematicUntilEndOf(State.Rising));
+            
     }
 
 
@@ -142,7 +165,7 @@ public class PlayerBehaviour : MonoBehaviour {
             if (animator.GetCurrentAnimatorStateInfo(0).IsName(entry.Key)) {
                 if (entry.Value != state)
                 {
-                    if (state != State.Falling && state != State.Uncontrolled)
+                    if (state != State.Falling && state != State.Rising && state != State.Landing)
                     {
                         transform.rotation = Quaternion.AngleAxis(transform.rotation.eulerAngles.y, Vector3.up);
                     }
@@ -173,6 +196,9 @@ public class PlayerBehaviour : MonoBehaviour {
     private Vector2 distanceAndHeightToCollider(float maxDistance)
     {
 
+        float isFloorThreshold = 0.05f;
+        float colliderFeetY = (collider.center.y + collider.transform.position.y - collider.bounds.size.y / 2);
+
         RaycastHit[] possibleColliderHits = Physics.BoxCastAll(collider.transform.position, collider.bounds.size, transform.forward, Quaternion.identity, maxDistance);
         float[] maxHeights = new float[possibleColliderHits.Length];
         float[] minDists = new float[possibleColliderHits.Length];
@@ -181,7 +207,8 @@ public class PlayerBehaviour : MonoBehaviour {
             RaycastHit hit = possibleColliderHits[i];
             if (hit.collider.gameObject != collider.gameObject)
             {
-                maxHeights[i] = hit.collider.transform.position.y + hit.collider.bounds.size.y / 2;
+                
+                maxHeights[i] = hit.collider.transform.position.y + hit.collider.bounds.size.y / 2 - colliderFeetY;
                 Vector3 hitPoint;
                 if (hit.collider is BoxCollider)
                     hitPoint = ((BoxCollider)hit.collider).ClosestPoint(transform.position);
@@ -189,7 +216,8 @@ public class PlayerBehaviour : MonoBehaviour {
                     hitPoint = hit.collider.ClosestPoint(transform.position);
                 Vector3 posDif = hitPoint - collider.ClosestPoint(hitPoint);
                 posDif.y = 0;
-                minDists[i] = posDif.magnitude;
+
+                minDists[i] = maxHeights[i] > isFloorThreshold ? posDif.magnitude : 1e10f;
             } else
             {
                 maxHeights[i] = -1e10f;
@@ -209,7 +237,9 @@ public class PlayerBehaviour : MonoBehaviour {
         }
 
         float minDist = minDists[maxIndex];
-        maxHeight -= (collider.center.y + collider.transform.position.y - collider.bounds.size.y / 2);
+
+        Debug.Log("[" + Time.frameCount + "] Obstacle height: " + maxHeight);
+        Debug.Log("[" + Time.frameCount + "] Distance to obstacle: " + minDist);
 
         return new Vector2(minDist, maxHeight);
     }
@@ -247,7 +277,7 @@ public class PlayerBehaviour : MonoBehaviour {
             new AnimationWithCondition(
                 () =>
                 {
-                    //deactivateGravityUntilLanding();
+                    setKinematicUntilLanding();
                     animator.SetTrigger("Jump");
                     lastJump = Time.time;
                 })
@@ -315,7 +345,7 @@ public class PlayerBehaviour : MonoBehaviour {
                     animator.SetTrigger("WallRun");
                     lastJump = Time.time;
                 })
-                .setMinDistance(0f)
+                .setMinDistance(1f)
                 .setMaxDistance(2.5f)
                 .setMinHeight(1.5f)
                 .addPrevState(State.Running)
@@ -328,6 +358,8 @@ public class PlayerBehaviour : MonoBehaviour {
     {
         return (Time.time - lastJump) > 2 && Input.GetKey("space");
     }
+
+    
 
     public class AnimationWithCondition
     {

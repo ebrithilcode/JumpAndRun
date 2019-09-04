@@ -18,6 +18,11 @@ public class CameraController : MonoBehaviour {
 	
 	// Update is called once per frame
 	void Update () {
+
+        float mouseWheel = Input.GetAxis("Mouse ScrollWheel");
+
+        distance -= mouseWheel * 2;
+
         float horizontal = Input.GetAxis("Mouse X");
         float vertical = Input.GetAxis("Mouse Y");
 
@@ -31,7 +36,11 @@ public class CameraController : MonoBehaviour {
         Debug.Log("Current magnitude: " + localPosition.magnitude);
         localPosition *= scalar;
 
-        transform.position = Vector3.MoveTowards(transform.position, localPosition + player.transform.position, Time.deltaTime*5f);
+        Vector3 positionToBe = localPosition + player.transform.position;
+
+        float camMoveSpeed = (positionToBe - transform.position).magnitude * Time.deltaTime * 6;
+
+        transform.position = Vector3.MoveTowards(transform.position, positionToBe, camMoveSpeed);
         transform.rotation = toRotate * transform.rotation;
 
         Quaternion toRotateUp = angleAroundAxis(-vertical * Time.deltaTime, Vector3.right);
