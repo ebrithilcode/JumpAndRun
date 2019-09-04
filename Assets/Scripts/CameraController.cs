@@ -31,8 +31,11 @@ public class CameraController : MonoBehaviour {
         Debug.Log("Current magnitude: " + localPosition.magnitude);
         localPosition *= scalar;
 
-        transform.position = Vector3.MoveTowards(transform.position, localPosition + player.transform.position, Time.deltaTime*3f);
+        transform.position = Vector3.MoveTowards(transform.position, localPosition + player.transform.position, Time.deltaTime*5f);
         transform.rotation = toRotate * transform.rotation;
+
+        Quaternion toRotateUp = angleAroundAxis(-vertical * Time.deltaTime, Vector3.right);
+        transform.rotation *= toRotateUp;
     }
 
     Quaternion angleAroundAxis(float angle, Vector3 axis)

@@ -4,9 +4,9 @@ using UnityEngine;
 
 public class PlayerBehaviour : MonoBehaviour {
 
-    enum State
+    public enum State
     {
-        Idle, Walking, Running, Jumping, Backwards, Undefined
+        Idle, Walking, Running, Jumping, Backwards, Falling, Uncontrolled, Undefined
     }
 
     State state = State.Idle;
@@ -17,7 +17,12 @@ public class PlayerBehaviour : MonoBehaviour {
     SkinnedMeshRenderer meshRenderer;
     BoxCollider collider;
 
+    Dictionary<State, List<System.Action>> onStateEnterCallbackList = new Dictionary<State, List<System.Action>>();
     Dictionary<State, List<System.Action>> onStateEndCallbackList = new Dictionary<State, List<System.Action>>();
+
+    List<AnimationWithCondition> possibleAnimations = new List<AnimationWithCondition>();
+
+    private float lastJump = 0;
 
 
     float speed = 0;
@@ -34,6 +39,12 @@ public class PlayerBehaviour : MonoBehaviour {
         animationNameToState.Add("Base.SlowUpJump", State.Jumping);
         animationNameToState.Add("Base.FastUpJump", State.Jumping);
         animationNameToState.Add("Base.WallRun", State.Jumping);
+        animationNameToState.Add("Base.Falling", State.Falling);
+        animationNameToState.Add("Base.Landing", State.Uncontrolled);
+        animationNameToState.Add("Base.StandUp", State.Uncontrolled);
+
+
+        addAnimationTransitions();
 
         
         
@@ -60,46 +71,39 @@ public class PlayerBehaviour : MonoBehaviour {
             transform.rotation *= eulerQuaternion(Vector3.up, turningValue * angularFrequency * Time.deltaTime / 2);
         }
 
+        //Manage possible falling:
+        if (state != State.Falling)
+        {
+            RaycastHit[] hits = Physics.RaycastAll(transform.position + Vector3.up*2, Vector3.down, 1000f);
+            float minDist = 1e10f;
+            Debug.Log("Ray cast hit " + hits.Length + " colliders");
+            foreach (RaycastHit hit in hits)
+            {
+                
+                if (hit.collider != collider)
+                {
+                    minDist = Mathf.Min(minDist, (hit.point - transform.position).magnitude);
+                }
+            }
+            if (minDist > 3f)
+            {
+                if (Time.time - lastJump > 1f)
+                {
+                    lastJump = Time.time;
+                    Debug.LogWarning("The player is now falling");
+                    animator.SetTrigger("StartFalling");
+                }
+            }
+        }
+
 
         
         animator.SetFloat("Speed", Input.GetAxis("Vertical"));
-
-        
-        //Jump on space
-        if (Input.GetKeyDown("space"))
-        {
-            float heightToJump = neededHeightForJump(3f);
-            switch(state)
-            {
-                case State.Running:
-                    if (heightToJump<0.5 || heightToJump>1.5)
-                    {
-                        deactivateGravityUntilLanding();
-                        if (heightToJump < 0.5)
-                        {
-                            animator.SetTrigger(heightToJump < 0.1 ? "Jump" : "JumpWithObstacle");
-                        } else
-                        {
-                            animator.SetTrigger("WallRun");
-                        }
-                    }
-                    break;
-
-                case State.Walking:
-                    if (heightToJump<0.7)
-                    {
-                        deactivateGravityUntilLanding();
-                        animator.SetTrigger(heightToJump < 0.1? "Jump" : "JumpWithObstacle");
-                    }
-                    break;
-
-                case State.Idle:
-                    deactivateGravityUntilLanding();
-                    animator.SetTrigger("Jump");
-                    break;
-            }
-            
+        Vector2 distanceToObstacle = distanceAndHeightToCollider(6f);
+        foreach (AnimationWithCondition possibleAnim in possibleAnimations) {
+            possibleAnim.playAnimationIfValid(this, distanceToObstacle.x, distanceToObstacle.y);
         }
+            
 
         //Run or run not
         if (Input.GetKeyDown("left shift"))
@@ -114,8 +118,20 @@ public class PlayerBehaviour : MonoBehaviour {
 
     private void deactivateGravityUntilLanding()
     {
-        GetComponent<Rigidbody>().useGravity = false;
+        OnStateEnter(State.Jumping, () => GetComponent<Rigidbody>().useGravity = false);
         OnStateFinish(State.Jumping, () => GetComponent<Rigidbody>().useGravity = true);
+    }
+
+    private void setKinematicUntilLanding()
+    {
+        OnStateEnter(State.Jumping, () => GetComponent<Rigidbody>().isKinematic = true);
+        OnStateFinish(State.Jumping, () => GetComponent<Rigidbody>().isKinematic = false);
+    }
+
+    //Manage possible landing
+    private void OnCollisionEnter(Collision collision)
+    {
+        if (state == State.Falling) animator.SetTrigger("LandHard");
     }
 
 
@@ -126,6 +142,10 @@ public class PlayerBehaviour : MonoBehaviour {
             if (animator.GetCurrentAnimatorStateInfo(0).IsName(entry.Key)) {
                 if (entry.Value != state)
                 {
+                    if (state != State.Falling && state != State.Uncontrolled)
+                    {
+                        transform.rotation = Quaternion.AngleAxis(transform.rotation.eulerAngles.y, Vector3.up);
+                    }
                     if (onStateEndCallbackList.ContainsKey(state))
                     {
                         foreach(System.Action action in onStateEndCallbackList[state])
@@ -133,6 +153,14 @@ public class PlayerBehaviour : MonoBehaviour {
                             action();
                         }
                         onStateEndCallbackList[state].Clear();
+                    }
+                    if (onStateEnterCallbackList.ContainsKey(entry.Value))
+                    {
+                        foreach (System.Action action in onStateEnterCallbackList[entry.Value])
+                        {
+                            action();
+                        }
+                        onStateEnterCallbackList.Clear();
                     }
                 }
                 return entry.Value;
@@ -142,20 +170,48 @@ public class PlayerBehaviour : MonoBehaviour {
         return State.Undefined;
     }
 
-    private float neededHeightForJump(float distance)
+    private Vector2 distanceAndHeightToCollider(float maxDistance)
     {
-        float maxHeight = -float.MaxValue;
 
-        foreach(RaycastHit hit in Physics.BoxCastAll(collider.transform.position, collider.bounds.size, transform.forward, Quaternion.identity, distance))
+        RaycastHit[] possibleColliderHits = Physics.BoxCastAll(collider.transform.position, collider.bounds.size, transform.forward, Quaternion.identity, maxDistance);
+        float[] maxHeights = new float[possibleColliderHits.Length];
+        float[] minDists = new float[possibleColliderHits.Length];
+        for (int i= 0;i<minDists.Length;i++)
         {
-            if (hit.collider.gameObject != collider.gameObject) 
-                maxHeight = Mathf.Max(maxHeight, hit.collider.transform.position.y + hit.collider.bounds.size.y/2);
+            RaycastHit hit = possibleColliderHits[i];
+            if (hit.collider.gameObject != collider.gameObject)
+            {
+                maxHeights[i] = hit.collider.transform.position.y + hit.collider.bounds.size.y / 2;
+                Vector3 hitPoint;
+                if (hit.collider is BoxCollider)
+                    hitPoint = ((BoxCollider)hit.collider).ClosestPoint(transform.position);
+                else
+                    hitPoint = hit.collider.ClosestPoint(transform.position);
+                Vector3 posDif = hitPoint - collider.ClosestPoint(hitPoint);
+                posDif.y = 0;
+                minDists[i] = posDif.magnitude;
+            } else
+            {
+                maxHeights[i] = -1e10f;
+                minDists[i] = 1e10f;
+            }
         }
 
-        Debug.Log("Heighest spot object: " + maxHeight);
-        Debug.Log("Loweset spot player: " + (collider.center.y + collider.transform.position.y - collider.bounds.size.y / 2));
-        
-        return maxHeight - (collider.center.y + collider.transform.position.y - collider.bounds.size.y/2) ;
+        int maxIndex = 0;
+        float maxHeight = maxHeights[0];
+        for (int i=0;i<maxHeights.Length;i++)
+        {
+            if (maxHeights[i] > maxHeight)
+            {
+                maxHeight = maxHeights[i];
+                maxIndex = i;
+            }
+        }
+
+        float minDist = minDists[maxIndex];
+        maxHeight -= (collider.center.y + collider.transform.position.y - collider.bounds.size.y / 2);
+
+        return new Vector2(minDist, maxHeight);
     }
 
 
@@ -177,5 +233,146 @@ public class PlayerBehaviour : MonoBehaviour {
         onStateEndCallbackList[state].Add(action);
     }
 
+    private void OnStateEnter(State state, System.Action action)
+    {
+        if (!onStateEnterCallbackList.ContainsKey(state)) onStateEnterCallbackList[state] = new List<System.Action>();
+
+        onStateEnterCallbackList[state].Add(action);
+    }
+
+    private void addAnimationTransitions()
+    {
+        //Idle jump
+        possibleAnimations.Add(
+            new AnimationWithCondition(
+                () =>
+                {
+                    //deactivateGravityUntilLanding();
+                    animator.SetTrigger("Jump");
+                    lastJump = Time.time;
+                })
+                .addPrevState(State.Idle)
+                .setPreCheck((script) => defaultJumpCondition())
+                );
+
+        //Butterfly and usual walking jump
+        possibleAnimations.Add(
+            new AnimationWithCondition(
+                () =>
+                {
+                    //deactivateGravityUntilLanding();
+                    setKinematicUntilLanding();
+                    animator.SetTrigger("Jump");
+                    lastJump = Time.time;
+                })
+                .setMinDistance(3)
+                .setMaxHeight(0.05f)
+                .addPrevState(State.Running).addPrevState(State.Walking)
+                .setPreCheck((script) => defaultJumpCondition())
+                );
+
+        //Dash over obstacle
+        possibleAnimations.Add(
+            new AnimationWithCondition(
+                () =>
+                {
+                    setKinematicUntilLanding();
+                    animator.SetTrigger("JumpWithObstacle");
+                    lastJump = Time.time;
+                })
+                .setMaxDistance(0.85f)
+                .setMaxHeight(0.8f)
+                .setMinHeight(0.1f)
+                .addPrevState(State.Running)
+                .setPreCheck((script) => defaultJumpCondition())
+                );
+
+        //Jump on obstacle
+        possibleAnimations.Add(
+            new AnimationWithCondition(
+                () =>
+                {
+
+                    setKinematicUntilLanding();
+                    animator.SetTrigger("JumpWithObstacle");
+                    lastJump = Time.time;
+                })
+                .setMaxDistance(1f)
+                .setMaxHeight(1f)
+                .setMinHeight(0.1f)
+                .addPrevState(State.Walking)
+                .setPreCheck((script) => defaultJumpCondition())
+                );
+
+        //Wallflip
+        possibleAnimations.Add(
+            new AnimationWithCondition(
+                () =>
+                {
+                   
+                    Debug.LogWarning("Triggering wall jump");
+                    setKinematicUntilLanding();
+                    animator.SetTrigger("WallRun");
+                    lastJump = Time.time;
+                })
+                .setMinDistance(0f)
+                .setMaxDistance(2.5f)
+                .setMinHeight(1.5f)
+                .addPrevState(State.Running)
+                .setPreCheck((script) => defaultJumpCondition())
+                );
+
+    }
+
+    private bool defaultJumpCondition()
+    {
+        return (Time.time - lastJump) > 2 && Input.GetKey("space");
+    }
+
+    public class AnimationWithCondition
+    {
+        private List<State> previuosStates = new List<State>();
+        private Vector2 distanceToObjectMinMax = new Vector2(-float.MaxValue, float.MaxValue);
+        private Vector2 feedHeightDistanceToObjectMinMax = new Vector2(-float.MaxValue, float.MaxValue);
+        private System.Action actionIfValid;
+        private System.Predicate<PlayerBehaviour> preprocessingCheck;
+
+        public AnimationWithCondition(System.Action onValidation) { this.actionIfValid = onValidation; }
+
+        public AnimationWithCondition addPrevState(State state) { previuosStates.Add(state); return this; }
+        public AnimationWithCondition setMinDistance(float value) { distanceToObjectMinMax.x = value; return this; }
+        public AnimationWithCondition setMaxDistance(float value) { distanceToObjectMinMax.y = value; return this; }
+        public AnimationWithCondition setMinHeight(float value) { feedHeightDistanceToObjectMinMax.x = value; return this; }
+        public AnimationWithCondition setMaxHeight(float value) { feedHeightDistanceToObjectMinMax.y = value; return this; }
+        public AnimationWithCondition setPreCheck(System.Predicate<PlayerBehaviour> predicate) { preprocessingCheck = predicate; return this; }
+
+
+
+        public bool playAnimationIfValid(PlayerBehaviour playerScript, float distanceToObject, float heightDifference)
+        {
+            State currentState = playerScript.state;
+            if (preprocessingCheck!=null && !preprocessingCheck(playerScript)) return false;
+            if (isValid(currentState, distanceToObject, heightDifference))
+            {
+                actionIfValid();
+                return true;
+            }
+            return false;
+        }
+
+
+
+        private bool isValid(State state, float distanceToObject, float heightDifference)
+        {
+
+            return (previuosStates.Contains(state)) && isInbetween(distanceToObject, distanceToObjectMinMax)
+                && isInbetween(heightDifference, feedHeightDistanceToObjectMinMax);
+        }
+
+        private bool isInbetween(float value, Vector2 bounds)
+        {
+            return value >= bounds.x && value <= bounds.y;
+        }
+    }
     
 }
