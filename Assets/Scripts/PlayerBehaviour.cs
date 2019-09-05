@@ -49,8 +49,7 @@ public class PlayerBehaviour : MonoBehaviour {
         
         
 
-        animator = GetComponent<Animator>();
-        meshRenderer = GetComponentInChildren<SkinnedMeshRenderer>();
+        animator = GetComponentInChildren<Animator>();
         collider = GetComponentInChildren<BoxCollider>();
 	}
 
@@ -58,7 +57,6 @@ public class PlayerBehaviour : MonoBehaviour {
 	// Update is called once per frame
 	void Update () {    
 
-        
 
 
         state = getCurrentAnimatorState();
@@ -74,18 +72,8 @@ public class PlayerBehaviour : MonoBehaviour {
         //Manage possible falling:
         if (state != State.Falling)
         {
-            RaycastHit[] hits = Physics.RaycastAll(transform.position + Vector3.up*2, Vector3.down, 1000f);
-            float minDist = 1e10f;
-            Debug.Log("Ray cast hit " + hits.Length + " colliders");
-            foreach (RaycastHit hit in hits)
-            {
-                
-                if (hit.collider != collider)
-                {
-                    minDist = Mathf.Min(minDist, (hit.point - transform.position).magnitude);
-                }
-            }
-            if (minDist > 2f)
+            float minDist = getDistanceToGround();
+            if (minDist > 4f)
             {
                 if (Time.time - lastJump > 1f)
                 {
@@ -151,9 +139,12 @@ public class PlayerBehaviour : MonoBehaviour {
     //Manage possible landing
     private void OnCollisionEnter(Collision collision)
     {
-        animator.SetTrigger("LandHard");
-        OnStateFinish(State.Landing,
-                () => setKinematicUntilEndOf(State.Rising));
+        if (state == State.Falling && getDistanceToGround() < 1)
+        {
+            animator.SetTrigger("LandHard");
+            OnStateFinish(State.Landing,
+                    () => setKinematicUntilEndOf(State.Rising));
+        }
             
     }
 
@@ -238,15 +229,29 @@ public class PlayerBehaviour : MonoBehaviour {
 
         float minDist = minDists[maxIndex];
 
-        Debug.Log("[" + Time.frameCount + "] Obstacle height: " + maxHeight);
-        Debug.Log("[" + Time.frameCount + "] Distance to obstacle: " + minDist);
-
         return new Vector2(minDist, maxHeight);
     }
 
-
-    private void OnAnimatorMove()
+    float getDistanceToGround()
     {
+        RaycastHit[] hits = Physics.RaycastAll(transform.position + Vector3.up * 2, Vector3.down, 1000f);
+        float minDist = 1e10f;
+        Debug.Log("Ray cast hit " + hits.Length + " colliders");
+        foreach (RaycastHit hit in hits)
+        {
+
+            if (hit.collider != collider)
+            {
+                minDist = Mathf.Min(minDist, (hit.point - transform.position).magnitude);
+            }
+        }
+        Debug.Log("[" + Time.frameCount + "] Distance to the ground: " + minDist);
+        return minDist;
+    }
+
+    public void OnAnimatorMove()
+    {
+        
         transform.position += animator.deltaPosition;
         transform.rotation *= animator.deltaRotation;
     }
@@ -277,8 +282,10 @@ public class PlayerBehaviour : MonoBehaviour {
             new AnimationWithCondition(
                 () =>
                 {
+                    Debug.LogWarning("Performing idle jump");
                     setKinematicUntilLanding();
-                    animator.SetTrigger("Jump");
+                    animator.Play("Base.IdleJump");
+                    //animator.SetTrigger("Jump");
                     lastJump = Time.time;
                 })
                 .addPrevState(State.Idle)
@@ -290,12 +297,12 @@ public class PlayerBehaviour : MonoBehaviour {
             new AnimationWithCondition(
                 () =>
                 {
-                    //deactivateGravityUntilLanding();
-                    setKinematicUntilLanding();
+                    deactivateGravityUntilLanding();
+                    //setKinematicUntilLanding();
                     animator.SetTrigger("Jump");
                     lastJump = Time.time;
                 })
-                .setMinDistance(3)
+                .setMinDistance(5f)
                 .setMaxHeight(0.05f)
                 .addPrevState(State.Running).addPrevState(State.Walking)
                 .setPreCheck((script) => defaultJumpCondition())
@@ -345,8 +352,8 @@ public class PlayerBehaviour : MonoBehaviour {
                     animator.SetTrigger("WallRun");
                     lastJump = Time.time;
                 })
-                .setMinDistance(1f)
-                .setMaxDistance(2.5f)
+                .setMinDistance(2f)
+                .setMaxDistance(3f)
                 .setMinHeight(1.5f)
                 .addPrevState(State.Running)
                 .setPreCheck((script) => defaultJumpCondition())
@@ -386,6 +393,7 @@ public class PlayerBehaviour : MonoBehaviour {
             if (preprocessingCheck!=null && !preprocessingCheck(playerScript)) return false;
             if (isValid(currentState, distanceToObject, heightDifference))
             {
+                Debug.LogWarning("Animation with the distance " + distanceToObject + " is valid for  min " + distanceToObjectMinMax.x);
                 actionIfValid();
                 return true;
             }
