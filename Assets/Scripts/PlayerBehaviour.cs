@@ -308,7 +308,7 @@ public class PlayerBehaviour : MonoBehaviour {
                 .setPreCheck((script) => defaultJumpCondition())
                 );
 
-        //Dash over obstacle
+        //Running jump on obstacle
         possibleAnimations.Add(
             new AnimationWithCondition(
                 () =>
@@ -317,9 +317,10 @@ public class PlayerBehaviour : MonoBehaviour {
                     animator.SetTrigger("JumpWithObstacle");
                     lastJump = Time.time;
                 })
-                .setMaxDistance(0.85f)
-                .setMaxHeight(0.8f)
-                .setMinHeight(0.1f)
+                .setMaxDistance(2f)
+                .setMinDistance(1.5f)
+                .setMaxHeight(1f)
+                .setMinHeight(0.7f)
                 .addPrevState(State.Running)
                 .setPreCheck((script) => defaultJumpCondition())
                 );
@@ -335,7 +336,7 @@ public class PlayerBehaviour : MonoBehaviour {
                     lastJump = Time.time;
                 })
                 .setMaxDistance(1f)
-                .setMaxHeight(1f)
+                .setMaxHeight(0.8f)
                 .setMinHeight(0.1f)
                 .addPrevState(State.Walking)
                 .setPreCheck((script) => defaultJumpCondition())
@@ -354,7 +355,7 @@ public class PlayerBehaviour : MonoBehaviour {
                 })
                 .setMinDistance(2f)
                 .setMaxDistance(3f)
-                .setMinHeight(1.5f)
+                .setMinHeight(3f)
                 .addPrevState(State.Running)
                 .setPreCheck((script) => defaultJumpCondition())
                 );
